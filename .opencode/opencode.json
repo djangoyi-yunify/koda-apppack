@@ -1,0 +1,10 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "reference": {
+        "gh-action-bundles": {
+            "repository": "kubesphere-extensions/koda",
+            "branch": "main",
+            "description": "Koda is a cloud-native database and middleware platform built on Kubernetes."
+        }
+    }
+}
