@@ -43,5 +43,5 @@
 
 ## 6. 变更收尾
 
-- [ ] 6.1 使用 `git status` / `git diff` 检查变更范围，确保未引入无关文件
-- [ ] 6.2 按 `agent-rules/git.md` 规范提交变更
+- [x] 6.1 使用 `git status` / `git diff` 检查变更范围，确保未引入无关文件
+- [x] 6.2 按 `agent-rules/git.md` 规范提交变更
