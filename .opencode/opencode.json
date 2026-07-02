@@ -7,5 +7,9 @@
             "description": "Koda is a cloud-native database and middleware platform built on Kubernetes."
         }
     },
-    "instructions": ["agent-rules/git.md", "agent-rules/question.md"]
+    "instructions": [
+        "agent-rules/git.md",
+        "agent-rules/question.md",
+        "agent-rules/testing.md"
+    ]
 }

@@ -115,6 +115,21 @@ koda-apppack/
 - Redis 动态配置文件（`redis-runtime.conf`、`sentinel.conf`、`users.acl`）必须放在持久卷上，避免 Pod 重启后丢失角色、拓扑认知或 ACL 规则
 - 静态配置模板通过 `include` 被运行时配置引用，且以只读方式挂载
 
+## 技术标准
+
+### Shell 脚本
+
+本项目所有 Shell 脚本统一使用 **Bash**，以提高可维护性并充分利用数组、进程管理等特性：
+
+- shebang 固定为 `#!/usr/bin/env bash`
+- 开头启用严格模式：
+
+  ```bash
+  set -euo pipefail
+  ```
+
+- 需要跨平台或明确限制为 POSIX sh 的场景应单独说明并评审
+
 ## 参考文档
 
 ### 调研类（docs/research/）
