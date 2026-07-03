@@ -38,5 +38,5 @@
 
 ## 7. 提交与收尾
 
-- [ ] 7.1 使用 `git status` / `git diff` 检查变更范围
-- [ ] 7.2 按 `agent-rules/git.md` 规范提交变更
+- [x] 7.1 使用 `git status` / `git diff` 检查变更范围
+- [x] 7.2 按 `agent-rules/git.md` 规范提交变更
