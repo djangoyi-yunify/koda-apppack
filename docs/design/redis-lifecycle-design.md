@@ -19,10 +19,14 @@
 脚本路径：
 
 ```text
-scripts/lifecycle.sh
+scripts/lifecycle.sh      # 统一入口分发器
+scripts/helper.sh         # 公共 helper 函数库
+scripts/actions/*.sh      # 各动作函数库
 ```
 
-调用方式：
+`scripts/lifecycle.sh` 是薄分发器，负责加载公共 helper 和所有 action 函数库，并根据 `$1` 调用对应的函数。具体的动作实现按动作拆分到 `scripts/actions/` 目录下的独立文件中。
+
+调用方式（外部契约不变）：
 
 ```bash
 ./lifecycle.sh <action-name> <json-params>
@@ -37,29 +41,61 @@ scripts/lifecycle.sh
 
 - 不支持 stdin 管道传入参数；
 - `$1` 必填，`$2` 必填但允许为 `{}`；
-- 所有 `postProvision` 所需信息由环境变量提供或脚本自行推导，`$2` 不解析。
+- 所有 `postProvision` 所需信息由环境变量提供或脚本自行推导，`$2` 不解析；
+- 禁止直接执行 `scripts/actions/*.sh`，它们只作为函数库被 `lifecycle.sh` source。
 
 ---
 
 ## 3. 动作分发
 
-脚本内部按 `$1` 进行动作分发：
+`lifecycle.sh` 在加载 `helper.sh` 和所有 action 函数库后，按 `$1` 调用同名函数完成分发：
 
 ```text
+source scripts/helper.sh
+source scripts/actions/post-provision.sh
+source scripts/actions/role-probe.sh
+...
+
 case $ACTION in
   postProvision)
-    handle_post_provision
+    postProvision
     ;;
-  roleProbe|availableProbe|switchover|memberJoin|memberLeave|reconfigure)
-    fail "Action '$ACTION' is not implemented in this change"
+  roleProbe)
+    roleProbe
+    ;;
+  availableProbe)
+    availableProbe
+    ;;
+  switchover)
+    switchover
+    ;;
+  memberJoin)
+    memberJoin
+    ;;
+  memberLeave)
+    memberLeave
+    ;;
+  reconfigure)
+    reconfigure
+    ;;
+  "")
+    fail_json "Missing action name in \$1" ""
     ;;
   *)
-    fail "Unknown action '$ACTION'"
+    fail_json "Unknown action: ${ACTION}" ""
     ;;
 esac
 ```
 
+函数名与 action 名保持一致，dispatch 逻辑直观且无需命名转换。未实现的 action 由对应占位函数返回失败 JSON；空 `$1` 或未知 action 由分发器统一返回失败 JSON。
+
 `ComponentDefinition` 本次仅声明 `lifecycle.actions.postProvision`，其他动作暂不在定义层出现。
+
+### 3.1 Action 脚本约定
+
+- `scripts/actions/*.sh` 只定义函数，不写顶层执行代码；
+- action 脚本文件没有 shebang、不设置可执行权限，禁止作为独立入口直接运行；
+- 所有 action 函数都在 `lifecycle.sh` 的同一 shell 环境中被 source，因此可以直接使用 `helper.sh` 提供的公共函数以及 `lifecycle.sh` 中准备的环境变量。
 
 ---
 
