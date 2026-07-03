@@ -141,6 +141,7 @@ koda-apppack/
 ### 设计类（docs/design/）
 
 - `docs/design/redis-apppack-plan.md`：Redis AppPack 宏观开发计划
+- `docs/design/redis-lifecycle-design.md`：Redis 生命周期动作接口与 postProvision 设计
 
 ### 外部参考
 
