@@ -16,9 +16,9 @@
 
 - [x] 3.1 编写 `task-02-redis-replica-config-persistence.sh`，包含以下步骤：
   - 步骤 1：启动 master 和 replica 实例，配置 `requirepass`
-  - 步骤 2：使用 `redis-cli` 在 replica 上执行 `REPLICAOF` 建立主从关系，触发 `CONFIG REWRITE`，验证 `replicaof` / `masterauth` 写入 replica 的运行时配置文件，且同目录下的 `redis-template.conf` 未被修改
-  - 步骤 3：停止并重新启动 replica 实例，使用同一个持久化的运行时配置文件，验证 replica 以 `role:slave` 启动并重新连接 master
-  - 步骤 4：启动配置有 `requirepass` 和 `auth-pass` 的 Sentinel 实例，触发 `SENTINEL FAILOVER`，验证原 replica 提升为主库后其运行时配置文件中的 `replicaof` 被移除或更新
+  - 步骤 2：使用 `redis-cli` 在 replica 上执行 `REPLICAOF` 建立主从关系，触发 `CONFIG REWRITE`，验证 `replicaof` / `masterauth` 写入 replica 的主配置文件，且同目录下的 `redis-template.conf` 未被修改
+  - 步骤 3：停止并重新启动 replica 实例，使用同一个持久化的主配置文件，验证 replica 以 `role:slave` 启动并重新连接 master
+  - 步骤 4：启动配置有 `requirepass` 和 `auth-pass` 的 Sentinel 实例，触发 `SENTINEL FAILOVER`，验证原 replica 提升为主库后其主配置文件中的 `replicaof` 被移除或更新
 
 ## 4. Sentinel 持久化
 

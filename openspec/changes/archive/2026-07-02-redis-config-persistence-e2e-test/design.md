@@ -1,6 +1,6 @@
 ## Context
 
-`docs/research/redis-config-persistence-analysis.md` 提出：在容器环境中，Redis 运行时会回写 `redis.conf`、Sentinel 会回写 `sentinel.conf`。为避免只读 ConfigMap 挂载导致回写失败，以及避免 `emptyDir` 等临时存储导致重启丢失状态，推荐采用“运行时配置为主文件 + `include` 静态模板”的分离方案。
+`docs/research/redis-config-persistence-analysis.md` 提出：在容器环境中，Redis 运行时会回写 `redis.conf`、Sentinel 会回写 `sentinel.conf`。为避免只读 ConfigMap 挂载导致回写失败，以及避免 `emptyDir` 等临时存储导致重启丢失状态，推荐采用“主配置文件 + `include` 只读模板”的分离方案。
 
 本变更不实现 Koda AppPack 的生产代码，而是为上述机制编写最小化 e2e 测试，使用本地 Redis 7.2.14 二进制验证关键假设。
 
@@ -8,7 +8,7 @@
 
 **Goals:**
 - 使用本地 `redis-server` / `redis-cli` / `redis-sentinel` 验证 Redis 7.2.14 的 `include` + `CONFIG REWRITE` 行为。
-- 验证 `replicaof` / `masterauth` 在持久化运行时配置文件中的正确回写与重启恢复。
+- 验证 `replicaof` / `masterauth` 在持久化主配置文件中的正确回写与重启恢复。
 - 验证 Sentinel 的 `requirepass`、`auth-pass`、`known-replica`、`config-epoch` 回写与重启恢复。
 - 测试脚本遵循 `agent-rules/testing.md` 的粒度要求，每个任务独立可运行。
 
@@ -34,8 +34,8 @@
 ### 每个任务一个独立脚本
 - **原因**：`agent-rules/testing.md` 要求“将测试拆分为独立的、可单独运行的最小任务”。每个脚本自己负责 setup / run / cleanup，失败即停止。
 - **任务划分**：
-  1. **CONFIG REWRITE 隔离性（单独验证）**：使用 `maxmemory` 单一参数，验证 `CONFIG SET` + `CONFIG REWRITE` 只修改运行时主文件，不污染静态模板。
-  2. **Redis 副本配置持久化**：启动主从并配置密码；通过 `redis-cli` 建立复制关系，验证 `replicaof` / `masterauth` 写入运行时配置文件且模板未被修改；重启 replica 验证持久化配置生效；启动配置 `requirepass` 和 `auth-pass` 的 Sentinel 并触发 failover，验证 `replicaof` 更新。
+  1. **CONFIG REWRITE 隔离性（单独验证）**：使用 `maxmemory` 单一参数，验证 `CONFIG SET` + `CONFIG REWRITE` 只修改主配置文件，不污染只读模板。
+  2. **Redis 副本配置持久化**：启动主从并配置密码；通过 `redis-cli` 建立复制关系，验证 `replicaof` / `masterauth` 写入主配置文件且模板未被修改；重启 replica 验证持久化配置生效；启动配置 `requirepass` 和 `auth-pass` 的 Sentinel 并触发 failover，验证 `replicaof` 更新。
   3. **Sentinel 持久化**：独立启动主从 + Sentinel，先执行一次 failover 建立基线，再执行第二次 failover，只验证 `sentinel.conf` 中的 `known-replica` 与 `config-epoch` 更新，以及 Sentinel 重启后拓扑恢复。
   4. **完整回归测试**：顺序调用以上任务。
 
@@ -50,7 +50,7 @@
   /tmp/redis-cfg-e2e-XXXX/
   ├── master/
   │   ├── redis-template.conf      # 实例独立的只读模板
-  │   ├── redis-runtime.conf       # 运行时主文件，include ./redis-template.conf
+  │   ├── redis-runtime.conf       # 主配置文件，include ./redis-template.conf
   │   └── data/                    # 独立数据目录（dir 配置指向这里）
   ├── replica/
   │   ├── redis-template.conf

@@ -18,7 +18,7 @@ koda-apppack/
 │   │   ├── componentdefinition.yaml       # redis-server / redis-sentinel / redis-exporter 定义
 │   │   ├── applicationdefinition.yaml     # Redis 拓扑定义
 │   │   ├── componentmatrix.yaml           # 版本矩阵与镜像映射
-│   │   ├── configmap.yaml                 # 静态配置模板
+│   │   ├── configmap.yaml                 # 只读配置模板
 │   │   └── secret.yaml                    # 默认凭证模板
 │   └── README.md
 │
@@ -77,7 +77,7 @@ koda-apppack/
    - `reconfigure`：热加载配置
 
 3. **配置模板**（`configs/`）
-   - `redis-template.conf`：静态运行配置模板
+   - `redis-template.conf`：只读配置模板
    - `sentinel.conf`：Sentinel 配置模板
    - `aclfile.tpl`：ACL 规则模板
 
@@ -112,8 +112,8 @@ koda-apppack/
 
 - `Chart.appVersion` 前缀必须能在 `ComponentMatrix.releases[].engineVersion` 中匹配
 - `ComponentMatrix.images` 的 key 必须覆盖对应 `ComponentDefinition` 中所有 `containers[].name` 和 `initContainers[].name`
-- Redis 动态配置文件（`redis-runtime.conf`、`sentinel.conf`、`users.acl`）必须放在持久卷上，避免 Pod 重启后丢失角色、拓扑认知或 ACL 规则
-- 静态配置模板通过 `include` 被运行时配置引用，且以只读方式挂载
+- Redis 主配置文件（`redis-runtime.conf`、`sentinel.conf`）与 ACL 文件（`users.acl`）必须放在持久卷上，避免 Pod 重启后丢失角色、拓扑认知或 ACL 规则
+- 只读配置模板通过 `include` 被主配置文件引用，且以只读方式挂载
 
 ## 技术标准
 
