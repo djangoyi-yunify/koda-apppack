@@ -19,6 +19,7 @@ SENTINEL_OPERATOR_USER="op-sentinel"
 
 # Load shared helpers and action function libraries.
 source scripts/helper.sh
+source scripts/actions/account-provision.sh
 source scripts/actions/post-provision.sh
 source scripts/actions/role-probe.sh
 source scripts/actions/available-probe.sh
@@ -29,6 +30,9 @@ source scripts/actions/reconfigure.sh
 
 # Dispatch to the action function by name.
 case "$ACTION" in
+  accountProvision)
+    accountProvision "$PARAMS"
+    ;;
   postProvision)
     postProvision
     ;;

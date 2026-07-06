@@ -10,7 +10,7 @@
 
 为 Koda 平台提供一个**统一的生命周期动作脚本入口**，处理 Redis AppPack 所有组件级生命周期动作。
 
-本次变更仅实现 `postProvision`，其余动作（`roleProbe`、`availableProbe`、`switchover`、`memberJoin`、`memberLeave`、`reconfigure` 等）在本次变更中不实现，但脚本结构上预留扩展点。
+当前已实现 `postProvision` 与 `accountProvision`，其余动作（`roleProbe`、`availableProbe`、`switchover`、`memberJoin`、`memberLeave`、`reconfigure` 等）在本次变更中不实现，但脚本结构上预留扩展点。
 
 ---
 
@@ -52,11 +52,15 @@ scripts/actions/*.sh      # 各动作函数库
 
 ```text
 source scripts/helper.sh
+source scripts/actions/account-provision.sh
 source scripts/actions/post-provision.sh
 source scripts/actions/role-probe.sh
 ...
 
 case $ACTION in
+  accountProvision)
+    accountProvision "$PARAMS"
+    ;;
   postProvision)
     postProvision
     ;;
@@ -179,7 +183,68 @@ if SENTINEL MASTER ${master_name} 不存在:
 
 ---
 
-## 5. 输出格式
+## 5. accountProvision 设计
+
+`accountProvision` 在组件运行后为 Koda 声明的系统账号执行创建、更新或删除。
+
+### 5.1 职责划分
+
+| 组件 | 职责 |
+|---|---|
+| `redis-server` | 使用 `op-replica` 用户连接本地 Redis，执行 `ACL SETUSER` / `ACL DELUSER`。 |
+| `redis-sentinel` | 使用 `op-sentinel` 用户连接本地 Sentinel，执行 `ACL SETUSER` / `ACL DELUSER`。 |
+
+### 5.2 输入参数
+
+`accountProvision` 通过 `$2` 接收 JSON 参数：
+
+```json
+{"name":"app","password":"secret","statement":"~* +@read +@write +@connection"}
+```
+
+| 字段 | 是否必填 | 说明 |
+|---|---|---|
+| `name` | 必填 | 目标账号名 |
+| `password` | 非删除时必填 | 明文密码 |
+| `statement` | 必填 | 为 `"delete"` 时删除账号；为空字符串时使用默认 ACL 规则；其他值作为 ACL 规则段追加到 `ACL SETUSER`。 |
+
+### 5.3 statement 语义
+
+- `statement == "delete"`：执行 `ACL DELUSER <name>`。
+- `statement` 为空字符串：根据账号名选择默认规则。
+  - `default` 用户：`~* &* +@all`
+  - 其他用户：`~* +@read +@write +@connection`
+- `statement` 为其他字符串：作为 ACL 规则段，执行 `ACL SETUSER <name> on ><password> <statement>`。
+
+为降低命令注入风险，脚本拒绝以 `ACL ` 开头或包含 `;`、换行的 `statement`。
+
+### 5.4 targetPodSelector
+
+| 组件 | selector | 说明 |
+|---|---|---|
+| `redis-server` | `All` | Redis ACL 不会通过复制自动同步，必须在每个实例上独立执行。 |
+| `redis-sentinel` | `All` | Sentinel 之间也不会同步 ACL，必须独立执行。 |
+
+`ACL SETUSER`、`ACL DELUSER` 和 `ACL SAVE` 均为幂等或 retry-safe，选择 `All` 不会导致状态不一致。
+
+### 5.5 端口与 operator 用户
+
+脚本根据 `KODA_COMPONENT_TYPE` 选择连接目标：
+
+| 组件 | 端口 | operator 用户 |
+|---|---|---|
+| `redis-server` | `REDIS_PORT`（默认 6379） | `op-replica` |
+| `redis-sentinel` | `SENTINEL_PORT`（默认 26379） | `op-sentinel` |
+
+operator 密码由 `derive_password` 根据 `REDIS_CLUSTER_ID:<username>` 推导。
+
+### 5.6 ACL 持久化
+
+任何成功执行的 `ACL SETUSER` 或 `ACL DELUSER` 之后，脚本都会调用 `ACL SAVE`，把 ACL 写回 `init.sh` 配置的 `aclfile`（默认 `/data/users.acl`）。`ACL SAVE` 失败视为整个动作失败。
+
+---
+
+## 6. 输出格式
 
 脚本向 stdout 输出 JSON，结构固定为三个字段：
 
@@ -196,7 +261,7 @@ if SENTINEL MASTER ${master_name} 不存在:
 
 ---
 
-## 6. 退出码规则
+## 7. 退出码规则
 
 | 退出码 | 含义 |
 |---|---|
@@ -216,17 +281,20 @@ fail(message, error) {
 
 ---
 
-## 7. 幂等性
+## 8. 幂等性
 
 | 操作 | 幂等策略 |
 |---|---|
 | `REPLICAOF` | Redis 命令本身幂等，重复执行无伤害。 |
 | `SENTINEL MONITOR` | 非幂等。脚本先通过 `SENTINEL MASTER` 检查；若并发竞争导致创建失败，按已存在处理。 |
 | `SENTINEL SET auth-user/auth-pass` | 幂等，重复设置相同值无伤害。 |
+| `ACL SETUSER` | 幂等，重复设置相同规则无伤害。 |
+| `ACL DELUSER` | 幂等，删除不存在的用户返回 0 且不报错。 |
+| `ACL SAVE` | 幂等，重复保存无伤害。 |
 
 ---
 
-## 8. 与 init.sh 的关系
+## 9. 与 init.sh 的关系
 
 - `scripts/init.sh` 负责 init 容器阶段：创建 `redis-runtime.conf`、`sentinel.conf`、`users.acl`，并初始化 operator 账号；
 - `scripts/lifecycle.sh` 负责组件就绪后的运行时动作；
@@ -234,7 +302,7 @@ fail(message, error) {
 
 ---
 
-## 9. 未实现动作（本次变更外）
+## 10. 未实现动作（本次变更外）
 
 以下动作在本次变更中不实现，但脚本接口已预留：
 
@@ -249,6 +317,6 @@ fail(message, error) {
 
 ---
 
-## 10. 安全说明
+## 11. 安全说明
 
 脚本使用 `op-replica` 与 `op-sentinel` 两个 operator 账号执行管理命令。这两个账号在 `init.sh` 中通过 ACL 授予 `+@all` 权限。密码由 `REDIS_CLUSTER_ID` 与用户名经 SHA-256 推导，不依赖 Koda 直接传入明文密码。
