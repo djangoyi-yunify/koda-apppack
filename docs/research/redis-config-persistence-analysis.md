@@ -82,6 +82,15 @@ Redis 的 ACL 文件（`aclfile`）同样存在回写问题。当 ACL 规则发�
 
 `sentinel.conf` 与 `aclfile` 同理：前者未持久化会丢失拓扑认知，后者未持久化会丢失自定义用户与权限规则，均可能在重启后做出错误判断或导致认证失败。
 
+### 1.5 运行时配置热更新命令差异
+
+Redis server 与 Sentinel 虽然都基于 Redis 进程，但运行时的配置热更新命令并不相同：
+
+- **Redis server**：使用 `CONFIG SET <parameter> <value>` 修改运行时配置，使用 `CONFIG REWRITE` 将变更持久化到主配置文件。
+- **Redis Sentinel**：不支持标准 `CONFIG SET` 命令。部分运行时参数可通过 `SENTINEL CONFIG SET <parameter> <value>` 修改，但可写参数集与 Redis server 不同（例如 `loglevel` 可写，`maxmemory` 不可写）。Sentinel 专属配置（如 `down-after-milliseconds`）通过 `SENTINEL SET <master> <param> <value>` 管理，由 Sentinel 自动回写到 `sentinel.conf`。
+
+因此，为 Redis AppPack 实现统一的 `reconfigure` lifecycle action 时，若要通过运行时命令热更新配置，必须明确区分组件类型与命令路径。当前 `reconfigure` 实现仅支持 `redis-server`，通过 `CONFIG SET` + `CONFIG REWRITE` 完成热更新与持久化；Sentinel 的动态配置需要单独设计和验证，不在同一实现路径中处理。
+
 ## 2. 配置文件分类与持久化思路
 
 针对不同类型的配置文件，推荐采用不同的持久化策略。

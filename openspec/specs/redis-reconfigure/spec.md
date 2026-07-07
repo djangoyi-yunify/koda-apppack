@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the `reconfigure` lifecycle action for Redis AppPack, including the JSON input contract from koda-agent, parameter handling for `redis-server` and `redis-sentinel` components, default value table for removed parameters, and output format.
+Define the `reconfigure` lifecycle action for Redis AppPack, including the JSON input contract from koda-agent, parameter handling for the `redis-server` component, default value table for removed parameters, and output format.
 
 ## ADDED Requirements
 
@@ -75,9 +75,9 @@ The system SHALL output a JSON object to stdout with exactly the fields `status`
 - **WHEN** the `reconfigure` handler encounters an error
 - **THEN** stdout contains `{"status":"failure","message":"...","error":"..."}` before the script exits non-zero
 
-### Requirement: reconfigure selects port and operator user based on component type
+### Requirement: reconfigure targets redis-server only
 
-The system SHALL select the target port and operator username based on `KODA_COMPONENT_TYPE`. For `redis-server`, the system SHALL use `REDIS_PORT` and the `op-replica` operator user. For `redis-sentinel`, the system SHALL use `SENTINEL_PORT` and the `op-sentinel` operator user.
+The system SHALL only support `KODA_COMPONENT_TYPE=redis-server`. The system SHALL use `REDIS_PORT` and the `op-replica` operator user to execute redis-cli commands. For any other component type, the system SHALL output a failure JSON and exit non-zero.
 
 #### Scenario: redis-server component reconfigure
 
@@ -85,27 +85,21 @@ The system SHALL select the target port and operator username based on `KODA_COM
 - **WHEN** `reconfigure` executes a redis-cli command
 - **THEN** the command targets `127.0.0.1:REDIS_PORT` using the `op-replica` user
 
-#### Scenario: redis-sentinel component reconfigure
+#### Scenario: unsupported component type
 
 - **GIVEN** `KODA_COMPONENT_TYPE=redis-sentinel`
-- **WHEN** `reconfigure` executes a redis-cli command
-- **THEN** the command targets `127.0.0.1:SENTINEL_PORT` using the `op-sentinel` user
+- **WHEN** `reconfigure` is invoked
+- **THEN** the script outputs a failure JSON indicating that only `redis-server` is supported
 
 ### Requirement: reconfigure applies added and updated parameters
 
-For each changed parameter with a non-null `newValue`, the system SHALL execute `CONFIG SET <key> <newValue>` on the local Redis or Sentinel instance.
+For each changed parameter with a non-null `newValue`, the system SHALL execute `CONFIG SET <key> <newValue>` on the local Redis server instance.
 
 #### Scenario: Update maxmemory on redis-server
 
 - **GIVEN** `KODA_COMPONENT_TYPE=redis-server` and `KODA_CONFIG_CHANGED_PARAMETERS='[{"key":"maxmemory","newValue":"536870912"}]'`
 - **WHEN** `reconfigure` is invoked
 - **THEN** the script executes `CONFIG SET maxmemory 536870912`
-
-#### Scenario: Update loglevel on redis-sentinel
-
-- **GIVEN** `KODA_COMPONENT_TYPE=redis-sentinel` and `KODA_CONFIG_CHANGED_PARAMETERS='[{"key":"loglevel","newValue":"debug"}]'`
-- **WHEN** `reconfigure` is invoked
-- **THEN** the script executes `CONFIG SET loglevel debug`
 
 ### Requirement: reconfigure allows values containing spaces
 
@@ -126,16 +120,6 @@ If Redis returns an error for a `CONFIG SET` command, the system SHALL output a 
 - **GIVEN** `KODA_CONFIG_CHANGED_PARAMETERS='[{"key":"bind","newValue":"127.0.0.1"}]'` and Redis rejects the change
 - **WHEN** `reconfigure` is invoked
 - **THEN** the script outputs a failure JSON and exits non-zero
-
-### Requirement: reconfigure rejects Sentinel master parameters
-
-The system SHALL reject parameters whose key starts with `sentinel.`, because Sentinel master-specific parameters are out of scope for this action.
-
-#### Scenario: Sentinel master parameter is passed
-
-- **GIVEN** `KODA_COMPONENT_TYPE=redis-sentinel` and `KODA_CONFIG_CHANGED_PARAMETERS='[{"key":"sentinel.down-after-milliseconds","newValue":"3000"}]'`
-- **WHEN** `reconfigure` is invoked
-- **THEN** the script outputs a failure JSON indicating the parameter is not supported
 
 ### Requirement: reconfigure handles removed parameters with default values
 

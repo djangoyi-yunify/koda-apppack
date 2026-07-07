@@ -4,7 +4,7 @@ Redis AppPack 当前已实现 `postProvision` 与 `accountProvision`，但 `reco
 
 ## What Changes
 
-- 实现 `scripts/actions/reconfigure.sh` 中的 `reconfigure` 函数，支持 `redis-server` 与 `redis-sentinel` 组件。
+- 实现 `scripts/actions/reconfigure.sh` 中的 `reconfigure` 函数，仅支持 `redis-server` 组件。
 - 通过 `KODA_CONFIG_CHANGED_PARAMETERS` 解析变更参数，使用 `jq` 处理 JSON。
 - 对新增/更新参数执行 `CONFIG SET`，对 removed 参数执行 `CONFIG SET <default>`。
 - 所有成功应用后调用 `CONFIG REWRITE`，保证运行中配置与持久化配置一致。

@@ -244,7 +244,87 @@ operator 密码由 `derive_password` 根据 `REDIS_CLUSTER_ID:<username>` 推导
 
 ---
 
-## 6. 输出格式
+## 6. reconfigure 设计
+
+`reconfigure` 在组件运行后响应 Koda 的 `ComponentParameter` 热更新，通过 `CONFIG SET` 将变更参数应用到运行中的 `redis-server` 进程，并调用 `CONFIG REWRITE` 持久化到主配置。`redis-sentinel` 组件暂不支持 reconfigure。
+
+### 6.1 职责划分
+
+| 组件 | 职责 |
+|---|---|
+| `redis-server` | 解析变更参数，执行 `CONFIG SET`，成功后调用 `CONFIG REWRITE`。 |
+| `redis-sentinel` | 不支持；调用时返回失败 JSON。 |
+
+### 6.2 koda-agent 调用契约
+
+`reconfigure` 由 koda-agent 通过 `lifecycle.actions.reconfigure` 触发，实际 exec action 为 `configReconfigure:<config-name>`。koda-agent 将变更参数以 JSON 数组形式注入环境变量 `KODA_CONFIG_CHANGED_PARAMETERS`。
+
+| 变量 | 是否必填 | 说明 |
+|---|---|---|
+| `KODA_COMPONENT_TYPE` | 必填 | 当前仅支持 `redis-server`；其他类型返回失败 |
+| `REDIS_CLUSTER_ID` | 必填 | 集群标识，用于推导 operator 密码 |
+| `KODA_CONFIG_CHANGED_PARAMETERS` | 必填（或函数入参） | JSON 数组，每个元素包含 `key`、`newValue`；removed 参数 `newValue` 为 `null` |
+| `REDIS_PORT` | 可选 | `redis-server` 监听端口，默认 `6379` |
+
+`KODA_CONFIG_CHANGED_PARAMETERS` 示例：
+
+```json
+[
+  {"key":"maxmemory","newValue":"536870912"},
+  {"key":"loglevel","newValue":"debug"},
+  {"key":"maxmemory","oldValue":"536870912","newValue":null}
+]
+```
+
+`newValue` 为 `null` 表示该参数被移除，脚本会从默认值表中恢复默认值。
+
+### 6.3 端口与 operator 用户
+
+`reconfigure` 仅支持 `redis-server` 组件，使用 `REDIS_PORT`（默认 6379）和 operator 用户 `op-replica` 连接本地 Redis 实例。`redis-sentinel` 组件暂不支持。
+
+| 组件 | 端口 | operator 用户 |
+|---|---|---|
+| `redis-server` | `REDIS_PORT`（默认 6379） | `op-replica` |
+| `redis-sentinel` | 不支持 | 不支持 |
+
+operator 密码由 `derive_password` 根据 `REDIS_CLUSTER_ID:<username>` 推导。
+
+### 6.4 参数处理策略
+
+1. 校验 `KODA_COMPONENT_TYPE` 必须为 `redis-server`，否则直接输出失败 JSON。
+2. 使用 `jq` 解析 `KODA_CONFIG_CHANGED_PARAMETERS`；`jq` 缺失时直接输出失败 JSON 并退出非零。
+3. 遍历每个参数：
+   - `newValue` 非 `null`：执行 `CONFIG SET <key> <newValue>`。
+   - `newValue` 为 `null`：从 `scripts/actions/reconfigure.sh` 内的默认值表查找默认值，执行 `CONFIG SET <key> <defaultValue>`；表中没有则失败。
+4. 任一 `CONFIG SET` 失败（返回 `ERR` 或非零退出码）立即输出失败 JSON。
+5. 全部参数应用成功后，执行 `CONFIG REWRITE`；失败立即输出失败 JSON。
+
+### 6.5 默认值表
+
+`scripts/actions/reconfigure.sh` 内维护一份可扩展的关联数组 `_REDIS_RECONFIGURE_DEFAULTS`，用于 removed 参数恢复。当前包含常见可热加载参数，例如：
+
+| 参数 | 默认值 |
+|---|---|
+| `maxmemory` | `0` |
+| `maxmemory-policy` | `noeviction` |
+| `loglevel` | `notice` |
+| `timeout` | `0` |
+| `tcp-keepalive` | `300` |
+| `client-output-buffer-limit` | `normal 0 0 0` |
+| `databases` | `16` |
+
+新增参数支持时，只需在该表中追加对应条目。
+
+### 6.6 幂等性
+
+| 操作 | 幂等策略 |
+|---|---|
+| `CONFIG SET` | Redis 命令本身幂等，重复设置相同值无伤害。 |
+| `CONFIG REWRITE` | 幂等，重复执行无伤害。 |
+
+---
+
+## 7. 输出格式
 
 脚本向 stdout 输出 JSON，结构固定为三个字段：
 
@@ -261,7 +341,7 @@ operator 密码由 `derive_password` 根据 `REDIS_CLUSTER_ID:<username>` 推导
 
 ---
 
-## 7. 退出码规则
+## 8. 退出码规则
 
 | 退出码 | 含义 |
 |---|---|
@@ -281,7 +361,7 @@ fail(message, error) {
 
 ---
 
-## 8. 幂等性
+## 9. 幂等性
 
 | 操作 | 幂等策略 |
 |---|---|
@@ -291,10 +371,12 @@ fail(message, error) {
 | `ACL SETUSER` | 幂等，重复设置相同规则无伤害。 |
 | `ACL DELUSER` | 幂等，删除不存在的用户返回 0 且不报错。 |
 | `ACL SAVE` | 幂等，重复保存无伤害。 |
+| `CONFIG SET` | Redis 命令本身幂等，重复设置相同值无伤害。 |
+| `CONFIG REWRITE` | 幂等，重复执行无伤害。 |
 
 ---
 
-## 9. 与 init.sh 的关系
+## 10. 与 init.sh 的关系
 
 - `scripts/init.sh` 负责 init 容器阶段：创建 `redis-runtime.conf`、`sentinel.conf`、`users.acl`，并初始化 operator 账号；
 - `scripts/lifecycle.sh` 负责组件就绪后的运行时动作；
@@ -302,7 +384,7 @@ fail(message, error) {
 
 ---
 
-## 10. 未实现动作（本次变更外）
+## 11. 未实现动作（本次变更外）
 
 以下动作在本次变更中不实现，但脚本接口已预留：
 
@@ -311,12 +393,11 @@ fail(message, error) {
 - `switchover`
 - `memberJoin`
 - `memberLeave`
-- `reconfigure`
 
 这些动作未来会逐步加入 `scripts/lifecycle.sh`，并在 `ComponentDefinition` 中声明。
 
 ---
 
-## 11. 安全说明
+## 12. 安全说明
 
 脚本使用 `op-replica` 与 `op-sentinel` 两个 operator 账号执行管理命令。这两个账号在 `init.sh` 中通过 ACL 授予 `+@all` 权限。密码由 `REDIS_CLUSTER_ID` 与用户名经 SHA-256 推导，不依赖 Koda 直接传入明文密码。

@@ -7,13 +7,14 @@ Redis AppPack 当前已实现 `postProvision` 与 `accountProvision`，`scripts/
 ## Goals / Non-Goals
 
 **Goals：**
-- 实现 `reconfigure` 动作，支持 `redis-server` 与 `redis-sentinel` 组件。
+- 实现 `reconfigure` 动作，仅支持 `redis-server` 组件。
 - 通过 `CONFIG SET` 应用新增/更新参数，通过默认值表恢复 removed 参数。
 - 成功应用后调用 `CONFIG REWRITE`，确保运行中配置与持久化配置一致。
 - 保持现有 `include` 配置模型不变，不修改 `scripts/init.sh`。
 - 更新 `docs/design/redis-lifecycle-design.md`，补充 `reconfigure` 设计与 koda-agent 调用契约。
 
 **Non-Goals：**
+- 不实现 `redis-sentinel` 组件的 reconfigure（Sentinel 不支持标准 `CONFIG SET`，其动态配置需单独设计）。
 - 不实现 Sentinel master 专属参数（如 `sentinel.down-after-milliseconds`）的热加载。
 - 不处理需要重启才能生效的 `immutable` / `restartOnly` 参数（Koda policy 不会把它们送到 reconfigure）。
 - 不修改 `accountProvision` 的参数读取方式（该修复属于独立 change）。
@@ -65,19 +66,20 @@ Redis AppPack 当前已实现 `postProvision` 与 `accountProvision`，`scripts/
 
 **替代方案：** 直接从主配置删除该行。rejected，因为 Redis 没有通用 reset 命令，且删除操作在 `CONFIG REWRITE` 后 fragile。
 
-### 5. 组件分支：按 `KODA_COMPONENT_TYPE`
+### 5. 组件分支：仅支持 `redis-server`
 
-**选择：** 根据 `KODA_COMPONENT_TYPE` 选择端口与 operator 用户；`redis-sentinel` 也视为通用 Redis 进程处理，拒绝 `sentinel.*` 参数。
+**选择：** `reconfigure` 仅支持 `KODA_COMPONENT_TYPE=redis-server`；其他组件类型直接返回失败 JSON。
 
 **理由：**
-- 与 `postProvision`、`accountProvision` 保持一致。
-- Sentinel 作为 Redis 进程支持通用 `CONFIG SET`，但 master 专属参数不在本次范围。
+- Redis server 支持 `CONFIG SET` + `CONFIG REWRITE` 完成运行时热更新与持久化。
+- Sentinel 不支持标准 `CONFIG SET`，其进程级配置需通过 `SENTINEL CONFIG SET`（可写参数集有限），master 专属配置需通过 `SENTINEL SET` 管理，命令路径与持久化机制均不同，不适合与 redis-server 共用同一实现。
+- 将 Sentinel reconfigure 留作独立 change，避免本次实现引入半支持代码。
 
 ### 6. 错误策略：严格失败
 
 **选择：** 遇到以下情况立即 `fail_json`：
+- `KODA_COMPONENT_TYPE` 不是 `redis-server`
 - Redis 返回 `ERR`（不支持动态加载的参数）
-- `sentinel.*` 类参数
 - removed 参数不在默认值表
 - `jq` 缺失或 JSON 解析失败
 
