@@ -196,17 +196,23 @@ if SENTINEL MASTER ${master_name} 不存在:
 
 ### 5.2 输入参数
 
-`accountProvision` 通过 `$2` 接收 JSON 参数：
+`accountProvision` 主输入来自 koda-agent 注入的环境变量。为便于本地验证，函数也支持接收一个可选的 JSON 字符串参数（与旧契约兼容的测试路径）。
+
+koda-agent 注入的环境变量：
+
+| 变量 | 是否必填 | 说明 |
+|---|---|---|
+| `KODA_ACCOUNT_NAME` | 必填 | 目标账号名 |
+| `KODA_ACCOUNT_PASSWORD` | 非删除时必填 | 明文密码；当 `KODA_ACCOUNT_STATEMENT` 为 `"delete"` 时不需要 |
+| `KODA_ACCOUNT_STATEMENT` | 必填 | 为 `"delete"` 时删除账号；为空字符串时使用默认 ACL 规则；其他值作为 ACL 规则段追加到 `ACL SETUSER` |
+
+手动测试时，可调用 `accountProvision '<json-params>'`，JSON 格式如下：
 
 ```json
 {"name":"app","password":"secret","statement":"~* +@read +@write +@connection"}
 ```
 
-| 字段 | 是否必填 | 说明 |
-|---|---|---|
-| `name` | 必填 | 目标账号名 |
-| `password` | 非删除时必填 | 明文密码 |
-| `statement` | 必填 | 为 `"delete"` 时删除账号；为空字符串时使用默认 ACL 规则；其他值作为 ACL 规则段追加到 `ACL SETUSER`。 |
+当传入非空 JSON 参数时，字段必填规则与环境变量路径一致。
 
 ### 5.3 statement 语义
 

@@ -17,23 +17,41 @@ _json_get_string() {
 }
 
 accountProvision() {
-  local params="$1"
+  local params_json="${1:-}"
 
   require_env "KODA_COMPONENT_TYPE"
   require_env "REDIS_CLUSTER_ID"
 
   local name="" password="" statement=""
 
-  if ! name=$(_json_get_string "$params" "name"); then
-    fail_json "Missing required field: name" ""
-  fi
+  if [[ -n "$params_json" && "$params_json" != "{}" ]]; then
+    if ! name=$(_json_get_string "$params_json" "name"); then
+      fail_json "Missing required field: name" ""
+    fi
 
-  if ! statement=$(_json_get_string "$params" "statement"); then
-    fail_json "Missing required field: statement" ""
-  fi
+    if ! statement=$(_json_get_string "$params_json" "statement"); then
+      fail_json "Missing required field: statement" ""
+    fi
 
-  if [[ "$statement" != "delete" ]]; then
-    if ! password=$(_json_get_string "$params" "password"); then
+    if [[ "$statement" != "delete" ]]; then
+      if ! password=$(_json_get_string "$params_json" "password"); then
+        fail_json "Missing required field: password for non-delete operation" ""
+      fi
+    fi
+  else
+    name="${KODA_ACCOUNT_NAME:-}"
+    statement="${KODA_ACCOUNT_STATEMENT:-}"
+    password="${KODA_ACCOUNT_PASSWORD:-}"
+
+    if [[ -z "$name" ]]; then
+      fail_json "Missing required field: name" ""
+    fi
+
+    if [[ -z "$statement" ]]; then
+      fail_json "Missing required field: statement" ""
+    fi
+
+    if [[ "$statement" != "delete" && -z "$password" ]]; then
       fail_json "Missing required field: password for non-delete operation" ""
     fi
   fi

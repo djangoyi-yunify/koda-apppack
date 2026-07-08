@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Define the `accountProvision` lifecycle action for Redis AppPack, including the JSON input contract, ACL rule handling, default permissions, supported component types (`redis-server` and `redis-sentinel`), idempotency, and output format.
+Define the `accountProvision` lifecycle action for Redis AppPack, including the environment variable input contract, optional JSON argument for manual testing, ACL rule handling, default permissions, supported component types (`redis-server` and `redis-sentinel`), idempotency, and output format.
 
 ## Requirements
 
@@ -12,8 +12,8 @@ The system SHALL extend the unified lifecycle script entrypoint at `scripts/life
 
 #### Scenario: Script receives accountProvision action name
 
-- **WHEN** Koda invokes `/scripts/lifecycle.sh accountProvision '<json-params>'`
-- **THEN** `lifecycle.sh` calls the `accountProvision` function with the JSON parameters
+- **WHEN** Koda invokes `/scripts/lifecycle.sh accountProvision`
+- **THEN** `lifecycle.sh` calls the `accountProvision` function, which reads parameters from environment variables
 
 #### Scenario: Script sources the account-provision action library
 
@@ -36,29 +36,35 @@ The system SHALL provide an action function library at `scripts/actions/account-
 
 ### Requirement: accountProvision input contract
 
-The system SHALL accept action parameters as a JSON string in `$2`. The JSON object SHALL contain `name` and `password` as required string fields and `statement` as a required string field.
+The system SHALL read action parameters from koda-agent-injected environment variables. The required variables are `KODA_ACCOUNT_NAME`, `KODA_ACCOUNT_PASSWORD` (except for delete operations), and `KODA_ACCOUNT_STATEMENT`. The function SHALL also accept an optional JSON string argument for manual testing, defaulting to the environment variable values.
 
-#### Scenario: accountProvision is invoked with valid JSON parameters
+#### Scenario: accountProvision reads from environment variables
+
+- **GIVEN** `KODA_ACCOUNT_NAME=app`, `KODA_ACCOUNT_PASSWORD=secret`, `KODA_ACCOUNT_STATEMENT="~* +@all"`
+- **WHEN** `accountProvision` is invoked without arguments
+- **THEN** the script proceeds to execute the ACL command
+
+#### Scenario: accountProvision is invoked with valid JSON parameters for testing
 
 - **GIVEN** `name=app`, `password=secret`, `statement="~* +@all"`
-- **WHEN** `accountProvision` is invoked
+- **WHEN** `accountProvision` is invoked with the JSON string `'{"name":"app","password":"secret","statement":"~* +@all"}'`
 - **THEN** the script proceeds to execute the ACL command
 
 #### Scenario: accountProvision is invoked with missing name
 
-- **GIVEN** the JSON input lacks the `name` field
+- **GIVEN** `KODA_ACCOUNT_NAME` is unset or empty
 - **WHEN** `accountProvision` is invoked
 - **THEN** the script outputs a failure JSON and exits non-zero
 
 #### Scenario: accountProvision is invoked with missing password for non-delete operation
 
-- **GIVEN** `statement` is not `"delete"` and the JSON input lacks the `password` field
+- **GIVEN** `KODA_ACCOUNT_STATEMENT` is not `"delete"` and `KODA_ACCOUNT_PASSWORD` is unset or empty
 - **WHEN** `accountProvision` is invoked
 - **THEN** the script outputs a failure JSON and exits non-zero
 
 #### Scenario: accountProvision is invoked with missing statement
 
-- **GIVEN** the JSON input lacks the `statement` field
+- **GIVEN** `KODA_ACCOUNT_STATEMENT` is unset or empty
 - **WHEN** `accountProvision` is invoked
 - **THEN** the script outputs a failure JSON and exits non-zero
 
