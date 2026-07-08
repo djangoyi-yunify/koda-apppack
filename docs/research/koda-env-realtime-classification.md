@@ -85,10 +85,12 @@ resolveDefinitionEnvRuntimeValue()  ← reconcile 阶段
 
 | 字段 | 示例变量 | 实时性 | 说明 |
 |---|---|---|---|
-| `host` | `KODA_HEADLESS_SERVICE` | **否（但稳定）** | 控制器拼接的 Service FQDN 字符串，通常不变 |
-| `port.name` | `KODA_SERVICE_PORT_REDIS` | **否** | Service 端口数字，Service 端口变更后不会同步 |
+| `host` | `KODA_HEADLESS_SERVICE` | **否（但稳定）** | Service FQDN 字符串，通常不变 |
+| `port.name` | `KODA_SERVICE_PORT_REDIS` | **否** | 按 `name` 选中 Service 端口，注入对应数字端口 |
 | `serviceType` | `KODA_SERVICE_TYPE` | **否** | Service 类型 |
 | `loadBalancer` | `KODA_SERVICE_LB` | **否** | LoadBalancer ingress，创建时读取 |
+
+> 详细说明、字段对应关系、实例级覆盖及 Pod 重建行为，参见 `docs/research/koda-env-service-projection.md`。
 
 ### 5. `serviceDependencyFieldRef`
 
@@ -100,6 +102,8 @@ resolveDefinitionEnvRuntimeValue()  ← reconcile 阶段
 | `podFQDNs` | **否** | 已解析依赖的 Pod FQDN 列表 |
 | `username` | **否** | 已解析依赖的用户名 |
 | `password` | **否** | 已解析依赖的密码 |
+
+> 详细说明参见 `docs/research/koda-env-service-projection.md`。
 
 ### 6. `credentialFieldRef`
 
@@ -175,7 +179,7 @@ resolveDefinitionEnvRuntimeValue()  ← reconcile 阶段
 
 ### Service 端口变更
 
-如果 `serviceFieldRef.port` 注入的端口后续被修改，已运行 Pod 的 env 不会同步。
+`serviceFieldRef.port.name` 注入的端口值以 Pod 创建时的 Service `port` 为准。详见 `docs/research/koda-env-service-projection.md`。
 
 ### 角色 / Leader 变化
 
@@ -236,6 +240,7 @@ koda-agent 在动作执行前，将 `ActionRequest.Parameters` 合并到进程 e
 
 ## 参考文档
 
+- `docs/research/koda-env-service-projection.md`
 - `docs/research/koda-member-lifecycle-action-context-research.md`
 - `docs/research/koda-port-and-headless-service-research.md`
 - Koda 源码：`internal/controller/core/component/env_projection.go`
