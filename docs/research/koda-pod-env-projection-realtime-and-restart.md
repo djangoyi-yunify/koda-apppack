@@ -1,4 +1,4 @@
-# Koda Pod 环境变量实时性分类（脚本视角）
+# Koda Pod 环境变量：投影机制、实时性与重启行为
 
 ## 核心结论
 
@@ -6,6 +6,8 @@ Pod 内脚本可见的环境变量只有两类：
 
 - **非实时**：通过 `ComponentDefinition.spec.env`、`podSpec.containers[].env` 以及各类 `*FieldRef` 投影到 Pod 的环境变量。它们在 **Pod 创建时由 kubelet 注入**；只要 Pod 不重建，运行期间不会更新。
 - **实时**：koda-agent 在执行 lifecycle action 时，通过 `ActionRequest.Parameters` 动态注入到进程中的环境变量。每次动作调用都会重新生成并注入。
+
+一个重要推论：**非实时 env 的值变化不会触发 Pod 重启**。Koda 通过 ConfigMap 间接注入 Plain 值、通过稳定引用保留 `ValueFrom` 值，使得 `PodTemplateRevision` 不受引用对象内容变化的影响。但这并不意味着运行中的 Pod 会自动读到新值——只有 Pod 重建后才会刷新。
 
 > 本文只讨论脚本直接通过 `env` 读取的信息，不涉及脚本主动查询外部系统（如 DNS、K8s API）的能力。
 
@@ -54,6 +56,81 @@ resolveDefinitionEnvRuntimeValue()  ← reconcile 阶段
 2. **最终都变成 PodSpec 的一部分**（`containers[*].env` 或 `containers[*].envFrom`）。
 
 因此，无论是 Koda 自定义的 `componentFieldRef`、`serviceFieldRef`，还是 K8s 原生的 `configMapKeyRef`、`secretKeyRef`、`fieldRef`、`resourceFieldRef`，**只要通过 `env` 或 `envFrom` 显式注入到容器中，在 Pod 不重建的情况下，脚本读到的值就不会改变**。
+
+---
+
+## 补充：非实时 env 值变化不会触发 Pod 重启
+
+虽然非实时 env 的值在运行中不会更新，但 Koda 的投影实现已经规避了“env 值变化导致 Pod 被滚动重启”的风险。其关键在于 Pod 模板中**不直接包含会变化的值**，而是包含稳定的引用。
+
+### Plain 值通过 ConfigMap 间接注入
+
+`BuildDefinitionEnvRuntime` 会把解析后的普通字符串写入一个稳定命名的 ConfigMap（`<component-name>-env`），并在 Pod 模板中通过 `envFrom` 引用该 ConfigMap：
+
+```go
+// internal/controller/core/component/env_projection.go
+if value.Plain {
+    runtime.EnvData[value.Name] = value.Value
+    continue
+}
+...
+runtime.ConfigMap = buildEnvConfigMap(ctx, runtime.EnvData)
+runtime.EnvFrom = append(runtime.EnvFrom, corev1.EnvFromSource{
+    ConfigMapRef: &corev1.ConfigMapEnvSource{
+        LocalObjectReference: corev1.LocalObjectReference{Name: runtime.ConfigMap.Name},
+    },
+})
+```
+
+因此 Pod 模板里只有稳定的 ConfigMap 名字。ConfigMap 内容变化不会改变 PodTemplateRevision，也就不会触发 StatefulGroup 的滚动更新。
+
+### `ValueFrom` 值在模板中保留稳定的引用
+
+`secretKeyRef`、`credentialFieldRef` 以及 `serviceDependencyFieldRef` 的 `ConnectionValue.ValueFrom` 形式不会进入 Koda 的 env ConfigMap，而是直接在 Pod 模板中生成 `ValueFrom.SecretKeyRef` 或 `ValueFrom.ConfigMapKeyRef`：
+
+```go
+// internal/controller/core/component/env_projection.go
+runtime.ExplicitEnv = append(runtime.ExplicitEnv, corev1.EnvVar{
+    Name:      value.Name,
+    Value:     value.Value,
+    ValueFrom: value.ValueFrom,
+})
+```
+
+这些引用指向的 Secret/ConfigMap 名字是稳定的（例如 `demo-db-account-root`），所以 Secret/ConfigMap **内容**变化同样不会改变 PodTemplateRevision。
+
+### `PodTemplateRevision` 只哈希 Pod 模板本身
+
+```go
+// internal/controller/runtime/revision/revision.go
+func PodTemplateRevision(template runtimev1alpha1.StatefulGroupPodTemplateSpec) (string, error) {
+    normalized := *template.DeepCopy()
+    ...
+    data, err := json.Marshal(normalized)
+    sum := sha256.Sum256(data)
+    return hex.EncodeToString(sum[:])[:16], nil
+}
+```
+
+`PodTemplateRevision` 仅对 Pod 模板做 JSON 哈希。只要模板中的 env 引用对象名字不变，引用对象的内容变化不会影响 revision。
+
+### 结论
+
+| env 来源 | 是否进 Koda env ConfigMap | Pod 模板中存什么 | 值变化是否触发 Pod 重启 |
+|---|---|---|---|
+| 直接值（`value`） | 是（`envFrom`） | 稳定 ConfigMap 名 | **否** |
+| `configMapKeyRef` | 是（解析后的值通过 `envFrom`） | 稳定 ConfigMap 名 | **否** |
+| `applicationFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `serviceFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `componentFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `tlsFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `resourceFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `hostNetworkFieldRef` | 是 | 稳定 ConfigMap 名 | **否** |
+| `serviceDependencyFieldRef` | 混合（`Value` 进 ConfigMap，`ValueFrom` 直接引用） | ConfigMap 名或稳定引用 | **否** |
+| `secretKeyRef` | 否 | 稳定 `SecretKeyRef` | **否** |
+| `credentialFieldRef` | 否 | 稳定 `SecretKeyRef` | **否** |
+
+> 注意：不触发重启不等于值会实时更新。运行中的容器不会自动感知 `envFrom` 或 `ValueFrom` 引用的对象内容变化；只有 Pod 重建（包括自然替换、扩缩容、滚动升级等）后才会读到新值。
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文聚焦 Koda 中与 Service 相关的环境变量投影机制，包括 `serviceFieldRef` 和 `serviceDependencyFieldRef`。关于这些 env 的实时性讨论，参见 `docs/research/koda-env-realtime-classification.md`。
+本文聚焦 Koda 中与 Service 相关的环境变量投影机制，包括 `serviceFieldRef` 和 `serviceDependencyFieldRef`。关于这些 env 的投影机制、实时性与重启行为，参见 `docs/research/koda-pod-env-projection-realtime-and-restart.md`。
 
 ---
 
@@ -136,7 +136,7 @@ spec:
 
 ## 参考文档
 
-- `docs/research/koda-env-realtime-classification.md`
+- `docs/research/koda-pod-env-projection-realtime-and-restart.md`
 - `docs/research/koda-port-and-headless-service-research.md`
 - Koda 源码：`internal/controller/core/component/env_projection.go`
 - Koda 源码：`internal/controller/core/component/service_builder.go`
