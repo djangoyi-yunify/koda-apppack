@@ -117,8 +117,6 @@ spec:
 
 因此，在“只从修改 Service 出发”的前提下，触发 Pod 重建的唯一路径是：`serviceFieldRef.port.name` 引用了该 Service `port`，且 `port` 发生了变化。
 
-> 建议：为降低心智负担，配置 Service 端口时建议保持 `port` 与 `targetPort` 取值相同。这样修改客户端端口即同步修改容器监听端口，行为更直观。
-
 ---
 
 ## `serviceDependencyFieldRef`
