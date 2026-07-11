@@ -8,7 +8,7 @@
 - 外部访问入口通过 Service（ClusterIP / NodePort / LoadBalancer / HostNetwork）提供。
 - Redis 通过 `replica-announce-ip` 和 `replica-announce-port` 宣告自己的外部可访问地址。
 - **控制面负责创建 Service、分配端口 / LB IP，并将运行时事实编码为环境变量**（如 `REDIS_ADVERTISED_PORT`、`REDIS_LB_ADVERTISED_HOST`、`REDIS_HOST_NETWORK_PORT`）。
-- 启动脚本解析环境变量，按 Pod ordinal 匹配当前 Pod 对应项，生成 `replica-announce-*` 配置。
+- 容器内脚本解析环境变量，按 Pod ordinal 匹配当前 Pod 对应项，生成 `replica-announce-*` 配置。
 
 本文聚焦回答：**Koda 控制面是否也提供类似的环境变量构建能力？** 如果有，能力边界在哪里；如果没有，差距是什么。
 
@@ -26,7 +26,7 @@ REDIS_LB_ADVERTISED_PORT  = mycluster-redis-redis-lb-advertised-0:6379,mycluster
 REDIS_LB_ADVERTISED_HOST  = mycluster-redis-redis-lb-advertised-0:lb-0.example.com,mycluster-redis-redis-lb-advertised-1:lb-1.example.com,...
 ```
 
-脚本 `redis-start.sh` 通过 `extract_obj_ordinal()` 从 Pod 名和 Service 名中提取 ordinal，匹配当前 Pod 对应项，从而得到正确的 `replica-announce-ip/port`。
+容器内脚本 `redis-start.sh` 通过 `extract_obj_ordinal()` 从 Pod 名和 Service 名中提取 ordinal，匹配当前 Pod 对应项，从而得到正确的 `replica-announce-ip/port`。
 
 ### 2.2 HostNetwork 端口注入
 
@@ -122,7 +122,7 @@ spec:
 
 ### 4.1 不支持 per-pod Service 聚合
 
-KubeBlocks Redis 方案的核心是**聚合所有 per-pod Service 的信息为逗号分隔字符串**，脚本端再按 ordinal 匹配。Koda 的 `serviceFieldRef` 只解析**单个 Service** 的单一标量字段：
+KubeBlocks Redis 方案的核心是**聚合所有 per-pod Service 的信息为逗号分隔字符串**，容器内脚本端再按 ordinal 匹配。Koda 的 `serviceFieldRef` 只解析**单个 Service** 的单一标量字段：
 
 ```go
 serviceName := serviceGeneratedName(ctx.Component.Name, effective.serviceNameSegment)
@@ -173,9 +173,9 @@ if effective.podService {
 
 即 **per-pod Service 的自动创建逻辑尚未实现**，对应的环境变量聚合链路也无从谈起。
 
-### 4.4 脚本侧缺少配套逻辑
+### 4.4 容器内脚本侧缺少配套逻辑
 
-KubeBlocks Redis 方案的另一关键是启动脚本 `redis-start.sh` 中 `parse_redis_announce_addr()` 的 ordinal 匹配与优先级回退逻辑。Koda 目前没有对应组件定义或脚本去消费这种聚合型环境变量。
+KubeBlocks Redis 方案的另一关键是容器内脚本 `redis-start.sh` 中 `parse_redis_announce_addr()` 的 ordinal 匹配与优先级回退逻辑。Koda 目前没有对应组件定义或容器内脚本去消费这种聚合型环境变量。
 
 ---
 
@@ -191,7 +191,7 @@ KubeBlocks Redis 方案的另一关键是启动脚本 `redis-start.sh` 中 `pars
 | 注入 HostNetwork 端口 | `hostNetworkVarRef` | `hostNetworkFieldRef` ✅ |
 | per-pod Service 自动创建 | ✅ 已实现 | ❌ 仅标记 pending |
 | 聚合所有 per-pod Service 为 `svcName:value,...` | ✅ 已实现 | ❌ 未实现 |
-| 按 ordinal 匹配当前 Pod 的 advertise 项 | 脚本侧实现 | 无对应控制面输出 |
+| 按 ordinal 匹配当前 Pod 的 advertise 项 | 容器内脚本侧实现 | 无对应控制面输出 |
 
 ---
 
@@ -204,7 +204,7 @@ KubeBlocks Redis 方案的另一关键是启动脚本 `redis-start.sh` 中 `pars
 1. **per-pod Service 创建未落地**：`PodService: true` 仅被标记为 pending，未实际创建 Service。
 2. **缺少聚合逻辑**：`serviceFieldRef` 只返回单个 Service 的标量值，不会生成 `svcName:value` 列表。
 3. **NodePort 取值不一致**：`serviceFieldRef.port` 取 `spec.ports[].port`，不取 `nodePort`。
-4. **缺少脚本侧配套**：没有类似 `redis-start.sh` 的 ordinal 匹配与优先级回退逻辑。
+4. **缺少容器内脚本侧配套**：没有类似 `redis-start.sh` 的 ordinal 匹配与优先级回退逻辑。
 
 ---
 
@@ -215,7 +215,7 @@ KubeBlocks Redis 方案的另一关键是启动脚本 `redis-start.sh` 中 `pars
 1. **实现 per-pod Service 创建**：在 runtime 侧根据 `PodService` 契约，为每个 Pod 创建独立 Service（命名格式建议 `<component>-<serviceNameSegment>-<ordinal>`）。
 2. **扩展环境变量聚合能力**：新增一种 env 来源（或扩展 `serviceFieldRef`），支持将所有 per-pod Service 的指定字段聚合为 `svcName:value,...` 字符串。
 3. **支持 NodePort 取值**：在端口解析逻辑中，当 Service 类型为 NodePort 时返回 `nodePort`。
-4. **提供启动脚本适配示例**：参考 `redis-start.sh`，在 Koda 的组件脚本中实现 ordinal 匹配与 `replica-announce-*` 生成。
+4. **提供容器内脚本适配示例**：参考 `redis-start.sh`，在 Koda 的组件容器内脚本中实现 ordinal 匹配与 `replica-announce-*` 生成。
 
 ---
 

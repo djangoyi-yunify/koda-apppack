@@ -1,6 +1,6 @@
 # kubeblocks-addons Redis 服务宣告机制调研
 
-本文聚焦 kubeblocks-addons 中 Redis 组件如何通过 Kubernetes Service 与 Redis 配置配合，实现外部可访问的复制拓扑。分析范围覆盖 ComponentDefinition 声明、控制面环境变量构建、启动脚本解析三个层面。
+本文聚焦 kubeblocks-addons 中 Redis 组件如何通过 Kubernetes Service 与 Redis 配置配合，实现外部可访问的复制拓扑。分析范围覆盖 ComponentDefinition 声明、控制面环境变量构建、容器内脚本解析三个层面。
 
 ---
 
@@ -11,7 +11,7 @@ kubeblocks-addons Redis 采用**"容器内监听端口固定 + 外部访问地�
 - Redis 进程在容器内始终监听固定端口（默认 `6379`）。
 - 外部访问入口通过 Kubernetes Service 提供，支持 ClusterIP、NodePort、LoadBalancer、HostNetwork 等多种模式。
 - Redis 通过 `replica-announce-ip` 和 `replica-announce-port` 向客户端和其他副本宣告自己的外部可访问地址。
-- 控制面将 Service 的运行时事实编码为环境变量，启动脚本解析这些环境变量并生成对应的 `replica-announce-*` 配置。
+- 控制面将 Service 的运行时事实编码为环境变量，容器内脚本解析这些环境变量并生成对应的 `replica-announce-*` 配置。
 
 ```
 ┌─────────────────┐
@@ -432,14 +432,14 @@ check_current_pod_is_primary() {
    - HostNetwork：外部地址 = Node IP + 分配的主机端口。
    - 默认：使用 Pod FQDN + 6379。
 
-3. **控制面与脚本分层清晰**
+3. **控制面与容器内脚本分层清晰**
    - 控制面负责：创建 Service、分配端口/LB IP、构建环境变量。
-   - 脚本负责：解析环境变量、按 Pod ordinal 匹配、生成 Redis 配置。
+   - 容器内脚本负责：解析环境变量、按 Pod ordinal 匹配、生成 Redis 配置。
 
 4. **per-pod Service 是 NodePort/LB 方案的前提**
    - 每个 Pod 需要独立的 Service 才能获得独立的外部端点。
    - 环境变量通过 `svcName:value,svcName:value,...` 的格式聚合所有 per-pod Service 信息。
-   - 脚本端通过 ordinal 匹配找到当前 Pod 对应的那一项。
+   - 容器内脚本端通过 ordinal 匹配找到当前 Pod 对应的那一项。
 
 5. **LoadBalancer 场景下 announce-port 硬编码为 6379**
    - 因为 LB Service 的 `spec.ports[].port` 就是外部访问端口。
