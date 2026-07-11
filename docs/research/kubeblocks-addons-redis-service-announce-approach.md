@@ -424,7 +424,7 @@ check_current_pod_is_primary() {
 
 1. **容器内端口固定**
    - Redis 进程始终监听 `6379`，不随外部 Service 类型变化。
-   - 外部端口与内部端口的差异通过 Service `targetPort` 映射解决。
+   - 外部端口与内部监听端口的差异通过两方面配合解决：一是 Service 的 `targetPort` 映射，将外部 Service 端口转接到容器固定端口；二是 Redis 的 `replica-announce-ip` 和 `replica-announce-port` 配置项，向客户端和其他副本宣告外部可访问地址。
 
 2. **外部访问地址完全由 Service 类型决定**
    - NodePort：外部地址 = Node IP + NodePort。
