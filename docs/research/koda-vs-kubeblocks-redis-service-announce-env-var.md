@@ -2,7 +2,7 @@
 
 ## 1. 背景与目标
 
-`docs/research/kubeblocks-addons-redis-service-announce-approach.md` 详细描述了 KubeBlocks 中 Redis 组件如何通过 Kubernetes Service 与控制面环境变量配合，实现外部可访问的复制拓扑：
+`docs/research/kubeblocks-addons-redis-service-announce-approach.md` 详细描述了 KubeBlocks 中 Redis 组件如何通过 Kubernetes Service、控制面环境变量与容器内脚本配合，实现外部可访问的复制拓扑：
 
 - 容器内 Redis 进程固定监听 `6379`。
 - 外部访问入口通过 Service（ClusterIP / NodePort / LoadBalancer / HostNetwork）提供。

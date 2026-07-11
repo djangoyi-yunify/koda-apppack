@@ -6,7 +6,7 @@
 
 ## 1. 核心设计思想
 
-kubeblocks-addons Redis 采用**"容器内监听端口固定 + 外部访问地址动态宣告"**的设计：
+kubeblocks-addons Redis 采用**"容器内监听端口固定 + 外部访问地址动态宣告 + 容器内脚本更新配置文件"**的设计：
 
 - Redis 进程在容器内始终监听固定端口（默认 `6379`）。
 - 外部访问入口通过 Kubernetes Service 提供，支持 ClusterIP、NodePort、LoadBalancer、HostNetwork 等多种模式。
