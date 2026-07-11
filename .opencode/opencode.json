@@ -1,15 +1,20 @@
 {
     "$schema": "https://opencode.ai/config.json",
-    "reference": {
+    "references": {
         "kubesphere-extensions/koda": {
             "repository": "kubesphere-extensions/koda",
             "branch": "main",
-            "description": "Koda is a cloud-native database and middleware platform built on Kubernetes."
+            "description": "用于 koda 项目的调研"
         },
         "apecloud/kubeblocks-addons": {
             "repository": "apecloud/kubeblocks-addons",
             "branch": "main",
-            "description": "KubeBlocks add-ons."
+            "description": "用于 KubeBlocks-addons 项目的调研"
+        },
+        "apecloud/kubeblocks": {
+            "repository": "apecloud/kubeblocks",
+            "branch": "main",
+            "description": "用于 KubeBlocks 项目的调研"
         }
     },
     "instructions": [
