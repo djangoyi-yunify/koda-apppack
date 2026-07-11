@@ -1,17 +1,17 @@
 {
     "$schema": "https://opencode.ai/config.json",
     "references": {
-        "kubesphere-extensions/koda": {
+        "kubesphere-extensions-koda": {
             "repository": "kubesphere-extensions/koda",
             "branch": "main",
             "description": "用于 koda 项目的调研"
         },
-        "apecloud/kubeblocks-addons": {
+        "apecloud-kubeblocks-addons": {
             "repository": "apecloud/kubeblocks-addons",
             "branch": "main",
             "description": "用于 KubeBlocks-addons 项目的调研"
         },
-        "apecloud/kubeblocks": {
+        "apecloud-kubeblocks": {
             "repository": "apecloud/kubeblocks",
             "branch": "main",
             "description": "用于 KubeBlocks 项目的调研"
