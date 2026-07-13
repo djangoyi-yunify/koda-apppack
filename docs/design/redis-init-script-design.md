@@ -73,6 +73,15 @@ scripts/init.sh sentinel
 | `LOG_DIR` | `/data/logs` | 否 | 日志目录（固定创建，供未来使用） |
 | `REDIS_PORT` | `6379` | 否 | Redis 端口 |
 | `SENTINEL_PORT` | `26379` | 否 | Sentinel 端口 |
+| `REDIS_HOST_NETWORK_PORT` | - | 否 | HostNetwork 模式下 Redis 被分配的主机端口，由 `hostNetworkFieldRef` 注入 |
+| `CURRENT_POD_HOST_IP` | - | 否 | 当前 Pod 所在节点 IP，通过 downward API `status.hostIP` 注入 |
+| `CURRENT_POD_IP` | - | 否 | 当前 Pod IP，通过 downward API `status.podIP` 注入 |
+| `HOSTNAME` | - | 否 | Pod 名，如 `redis-server-0` |
+| `POD_NAMESPACE` | - | 否 | Pod 所在命名空间 |
+| `KODA_HEADLESS_SERVICE` | - | 否 | `redis-server` 组件的 headless service 名，用于构造 Pod FQDN |
+| `KODA_SENTINEL_HEADLESS_SERVICE` | - | 否 | `redis-sentinel` 组件的 headless service 名，用于 Sentinel 查询 |
+| `KODA_SENTINEL_REPLICAS` | `0` | 否 | Sentinel 副本数；大于 0 时表示启用 Sentinel |
+| `KUBERNETES_CLUSTER_DOMAIN` | `cluster.local` | 否 | Kubernetes 集群域名 |
 
 ---
 
@@ -104,6 +113,7 @@ ACL 文件中使用 SHA256 哈希形式（`#<hash>`），避免明文存储。Se
 
 ```conf
 include /etc/redis/redis-template.conf
+include /data/redis-announce.conf
 dir /data/redis
 aclfile /data/users.acl
 masteruser op-replica
@@ -114,8 +124,52 @@ masterauth <op-replica-password>
 
 - 不写 `replicaof`，角色由 Koda provision 动作后续下发。
 - `masteruser`/`masterauth` 用于 Redis 节点间复制认证。
+- 通过 `include /data/redis-announce.conf` 引入易变的服务宣告配置，便于在 Pod 重建时独立更新，而不破坏主配置中的运行时状态。
 
-### 8.3 初始化 ACL 文件
+### 8.3 生成服务宣告配置
+
+文件路径：`/data/redis-announce.conf`
+
+脚本根据当前 Pod 的身份和可选的外部 Service 信息，生成或覆盖该文件：
+
+```conf
+replica-announce-ip <resolved-ip>
+replica-announce-port <resolved-port>
+```
+
+解析优先级：
+
+1. **HostNetwork 模式**：若 `REDIS_HOST_NETWORK_PORT` 非空，则 `replica-announce-ip` 取 `CURRENT_POD_HOST_IP`（或 `CURRENT_POD_IP`），`replica-announce-port` 取 `REDIS_HOST_NETWORK_PORT`。
+2. **per-pod NodePort Service（未来支持）**：若 `REDIS_ADVERTISED_PORT` 非空，按当前 Pod ordinal 匹配对应的 `svcName:nodePort`；命中后 `replica-announce-ip` 取节点 IP，`replica-announce-port` 取 nodePort。
+3. **per-pod LoadBalancer Service（未来支持）**：若 `REDIS_LB_ADVERTISED_HOST` 与 `REDIS_LB_ADVERTISED_PORT` 非空，按 ordinal 匹配 LB ingress 与端口。
+4. **Headless Service 回退**：无外部 Service 时，`replica-announce-ip` 取当前 Pod FQDN（优先 `hostname -f`，否则通过 `HOSTNAME` + `KODA_HEADLESS_SERVICE` 构造），`replica-announce-port` 取 `REDIS_PORT`。
+
+每次 `init.sh server` 执行都会重新解析并覆盖 `redis-announce.conf`，因此 Pod 重建后 announce 值会自动刷新。
+
+### 8.4 Pod 重建时的更新策略
+
+`redis-runtime.conf` 中包含 Redis 进程回写的运行时状态（如 `replicaof`、`masterauth` 等），因此不能简单覆盖整个文件。Pod 重建时的更新策略为：
+
+- **`redis-announce.conf`**：每次重新生成并覆盖，反映当前 Pod 最新的网络身份。
+- **`redis-runtime.conf`**：首次创建时生成；已存在时保持主体内容不变，仅在启用 Sentinel 时允许更新 `replicaof` 行。
+- **ACL 文件**：按第 10 节策略，组件自身运维用户原地替换重写，`default` 用户保留。
+
+该策略保证 Pod 重建后：Redis 启动所需的新 announce 地址已就绪，而历史运行状态不丢失。
+
+### 8.5 通过 Sentinel 修正 `replicaof`
+
+当 `KODA_SENTINEL_REPLICAS` 大于 0 且 `redis-runtime.conf` 已存在时，脚本会在启动前连接 Sentinel 查询当前 master，并原地修正 `replicaof`：
+
+1. 构造 Sentinel 实例地址：从 `KODA_SENTINEL_HEADLESS_SERVICE` 推导前缀，按 `KODA_SENTINEL_REPLICAS` 遍历 `prefix-0.headless`、`prefix-1.headless` 等。
+2. 使用 `op-sentinel` 用户执行 `SENTINEL MASTER ${REDIS_CLUSTER_ID}-master`。
+3. 解析返回结果中的 `ip` 与 `port`。
+4. 若解析出的 master 与当前 Pod 自身 announce 地址一致，则移除 `redis-runtime.conf` 中的 `replicaof`；否则写入/替换 `replicaof <master-ip> <master-port>`。
+
+首次创建时跳过该步骤，因为此时 Sentinel 可能尚未初始化。
+
+若 Sentinel 查询失败（例如 Sentinel 尚未就绪），脚本会打印告警并保留现有 `replicaof`，不阻塞启动。
+
+### 8.6 初始化 ACL 文件
 
 确保 `/data/users.acl` 内容如下：
 
@@ -221,10 +275,12 @@ Pod 重启后再次执行 init 脚本，不会破坏 Redis/Sentinel 已持久化
 
 以下事项不在 init 脚本职责范围内，由 Koda 生命周期动作（provision / accountProvision 等）后续处理：
 
-- 主从角色判定与 `replicaof` 配置
+- 首次启动时主从角色判定与 `replicaof` 配置
 - `sentinel monitor` 与 quorum 配置
 - Sentinel 到 Redis 的认证配置
 - 业务用户/密码的创建与变更
+
+> 注：Pod 重建时，`init.sh` 会在启用 Sentinel 的场景下查询当前 master 并更新 `replicaof`。这不属于首次角色判定，而是对既有运行状态的修复。
 
 ---
 
@@ -233,7 +289,8 @@ Pod 重启后再次执行 init 脚本，不会破坏 Redis/Sentinel 已持久化
 ### server Pod
 
 ```text
-/data/redis-runtime.conf   # Redis 主配置文件
+/data/redis-runtime.conf   # Redis 主配置文件（包含 include redis-announce.conf）
+/data/redis-announce.conf  # 服务宣告配置（replica-announce-ip/port）
 /data/users.acl            # ACL 文件
 /data/redis/               # 数据目录
 /data/logs/                # 日志目录

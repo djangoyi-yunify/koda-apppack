@@ -199,23 +199,32 @@ KubeBlocks Redis 方案的另一关键是容器内脚本 `redis-start.sh` 中 `p
 
 **Koda 控制面已经具备单个 Service 维度的环境变量注入能力**（Service Type、FQDN、LB Ingress、端口、HostNetwork 端口），在概念上对应 KubeBlocks 的 `serviceVarRef` 与 `hostNetworkVarRef`。
 
-但针对 Redis 这种 **per-pod Service + 聚合所有 Pod 的 Service 信息为逗号分隔字符串** 的服务宣告环境变量构建能力，Koda **目前尚未实现**。差距主要体现在：
+针对 Redis 这种 **per-pod Service + 聚合所有 Pod 的 Service 信息为逗号分隔字符串** 的服务宣告环境变量构建能力，Koda **目前尚未实现**。差距主要体现在：
 
 1. **per-pod Service 创建未落地**：`PodService: true` 仅被标记为 pending，未实际创建 Service。
 2. **缺少聚合逻辑**：`serviceFieldRef` 只返回单个 Service 的标量值，不会生成 `svcName:value` 列表。
 3. **NodePort 取值不一致**：`serviceFieldRef.port` 取 `spec.ports[].port`，不取 `nodePort`。
 4. **缺少容器内脚本侧配套**：没有类似 `redis-start.sh` 的 ordinal 匹配与优先级回退逻辑。
 
+### 6.1 当前设计选择
+
+鉴于上述能力差距，Redis AppPack 在当前阶段采用以下策略：
+
+- **默认回退到 Headless Service**：无外部 per-pod Service 时，`replica-announce-ip` 使用 Pod FQDN，`replica-announce-port` 使用容器端口 `6379`。
+- **HostNetwork 作为立即可用的外部宣告方式**：启用 `hostNetwork` 时，通过 `hostNetworkFieldRef` 注入 `REDIS_HOST_NETWORK_PORT`，`replica-announce-ip` 使用节点 IP。
+- **per-pod NodePort / LoadBalancer 作为未来能力**：脚本侧已预留 `REDIS_ADVERTISED_PORT`、`REDIS_LB_ADVERTISED_HOST`、`REDIS_LB_ADVERTISED_PORT` 的 ordinal 匹配逻辑，但完整 E2E 链路需等待 Koda 控制面支持 `PodService` 后才能落地。
+- **共享 ClusterIP Service 不用于 replica-announce**：仅作为集群内客户端访问入口，避免多个副本宣告同一地址导致 Sentinel 拓扑混乱。
+
 ---
 
 ## 7. 建议
 
-若要在 Koda 上复现 Redis 的服务宣告方案，需要补充以下能力：
+若要在 Koda 上完整复现 KubeBlocks Redis 的服务宣告方案，需要补充以下能力：
 
 1. **实现 per-pod Service 创建**：在 runtime 侧根据 `PodService` 契约，为每个 Pod 创建独立 Service（命名格式建议 `<component>-<serviceNameSegment>-<ordinal>`）。
 2. **扩展环境变量聚合能力**：新增一种 env 来源（或扩展 `serviceFieldRef`），支持将所有 per-pod Service 的指定字段聚合为 `svcName:value,...` 字符串。
 3. **支持 NodePort 取值**：在端口解析逻辑中，当 Service 类型为 NodePort 时返回 `nodePort`。
-4. **提供容器内脚本适配示例**：参考 `redis-start.sh`，在 Koda 的组件容器内脚本中实现 ordinal 匹配与 `replica-announce-*` 生成。
+4. **提供容器内脚本适配示例**：参考 `redis-start.sh`，在 Koda 的组件容器内脚本中实现 ordinal 匹配与 `replica-announce-*` 生成。当前 `scripts/init.sh` 中的 `lookup_value_by_ordinal` 与 `resolve_announce_addr` 已可作为起点。
 
 ---
 

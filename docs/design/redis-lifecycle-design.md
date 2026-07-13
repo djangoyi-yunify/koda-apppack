@@ -181,6 +181,16 @@ if SENTINEL MASTER ${master_name} 不存在:
 
 > **为什么 sentinel 也需要 `targetPodSelector: All`**：Sentinel 的 gossip 机制仅用于发现其他 sentinel（`known-sentinel`）和 replica（`known-replica`），并不会把某个 sentinel 正在监控的 master 配置传播给其他 sentinel。每个 sentinel 必须独立被告知要监控哪个 master，否则它不会参与该 master 的故障检测与 failover。
 
+### 4.7 为什么不使用共享 ClusterIP Service 作为 `replica-announce-*` 来源
+
+共享的 ClusterIP Service（或共享的 NodePort/LoadBalancer Service）会让多个 Redis Pod 宣告同一个入口地址。Sentinel 在维护拓扑时，会把该地址同时识别为 master 和 replica，导致：
+
+- 主从身份混淆；
+- 故障转移后客户端被错误地导向旧地址；
+- `SENTINEL SLAVES` 等命令返回的地址与实际 Pod 不一致。
+
+因此，`replica-announce-ip` / `replica-announce-port` 只能来源于**唯一标识单个 Pod 的入口**：per-pod NodePort、per-pod LoadBalancer、HostNetwork 主机端口，或 Headless Service 给出的 Pod FQDN。共享 ClusterIP Service 仅用于集群内部客户端访问，不作为服务宣告源。
+
 ---
 
 ## 5. accountProvision 设计
